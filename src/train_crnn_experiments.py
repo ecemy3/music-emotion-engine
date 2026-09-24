@@ -15,7 +15,6 @@ from typing import Dict, List
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import soundfile as sf
 import torch
 import torch.nn as nn
 import torchaudio
@@ -24,6 +23,17 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+
+from audio_preprocessing import (
+    load_audio_waveform as load_audio,
+    wav_to_logmel,
+    SR,
+    DURATION,
+    SAMPLES,
+    N_FFT,
+    HOP,
+    N_MELS,
+)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -40,28 +50,12 @@ COMPARISON_OUT = os.path.join(RESULTS_DIR, "model_comparison.csv")
 SPLIT_OUT = os.path.join(CONFIGS_DIR, "fixed_split_seed42.csv")
 EXPERIMENT_LOG_OUT = os.path.join(LOGS_DIR, "experiment_log.csv")
 
-SR = 22050
-DURATION = 30
-SAMPLES = SR * DURATION
-
-N_FFT = 2048
-HOP = 512
-N_MELS = 128
-
 DEFAULT_BATCH_SIZE = 16
 DEFAULT_EPOCHS = 60
 DEFAULT_LR = 1e-3
 DEFAULT_SEED = 42
 TEST_SIZE = 0.15
 VAL_SIZE_TOTAL = 0.15
-
-mel_spec = torchaudio.transforms.MelSpectrogram(
-    sample_rate=SR,
-    n_fft=N_FFT,
-    hop_length=HOP,
-    n_mels=N_MELS,
-)
-to_db = torchaudio.transforms.AmplitudeToDB()
 
 
 EXPERIMENT_PRESETS: Dict[str, Dict] = {
@@ -197,33 +191,6 @@ def build_artifact_paths(experiment_name: str) -> ArtifactPaths:
         scatter_arousal_plot=os.path.join(RESULTS_DIR, f"{experiment_name}_scatter_arousal.png"),
         error_hist_plot=os.path.join(RESULTS_DIR, f"{experiment_name}_error_hist.png"),
     )
-
-
-def load_audio(path: str) -> torch.Tensor:
-    wav, sr = sf.read(path, dtype="float32")
-    wav = torch.from_numpy(wav)
-
-    if wav.ndim == 2:
-        wav = torch.mean(wav, dim=1)
-
-    wav = wav.unsqueeze(0)
-
-    if sr != SR:
-        wav = torchaudio.functional.resample(wav, sr, SR)
-
-    if wav.shape[1] < SAMPLES:
-        wav = torch.nn.functional.pad(wav, (0, SAMPLES - wav.shape[1]))
-    else:
-        wav = wav[:, :SAMPLES]
-
-    return wav
-
-
-def wav_to_logmel(wav: torch.Tensor) -> torch.Tensor:
-    m = mel_spec(wav)
-    m = to_db(m)
-    m = (m - m.mean()) / (m.std() + 1e-6)
-    return m
 
 
 class DEAMDataset(Dataset):

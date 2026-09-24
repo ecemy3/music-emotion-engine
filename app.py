@@ -1,5 +1,4 @@
 import os
-import io
 import glob
 import re
 import pandas as pd
@@ -7,9 +6,6 @@ import numpy as np
 import streamlit as st
 import torch
 import torch.nn as nn
-import torchaudio
-import soundfile as sf
-import librosa
 import matplotlib.pyplot as plt
 import json
 import traceback
@@ -69,17 +65,12 @@ from src.flux_image_generator import (
     load_flux_cached_image,
 )
 from src.art_dna_engine import analyze_art_dna
+from src.audio_preprocessing import load_audio_waveform, wav_to_logmel
 
 
 load_dotenv()
 
 
-SR = 16000
-DURATION = 30
-SAMPLES = SR * DURATION
-N_FFT = 1024
-HOP = 512
-N_MELS = 128
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 COMPARISON_CSV = os.path.join("results", "model_comparison.csv")
@@ -92,14 +83,6 @@ ENSEMBLE_WEIGHTS = {
     "crnn_v2": 0.40,
 }
 ENSEMBLE_COMPARISON_NAME = "ensemble_best"
-
-mel_spec = torchaudio.transforms.MelSpectrogram(
-    sample_rate=SR,
-    n_fft=N_FFT,
-    hop_length=HOP,
-    n_mels=N_MELS,
-)
-to_db = torchaudio.transforms.AmplitudeToDB()
 
 
 class CNNVA(nn.Module):
@@ -613,44 +596,17 @@ def filter_df_by_song(df, song_col, selected_song):
 
 def load_audio(audio_bytes, file_extension="wav"):
     """
-    Audio dosyasını yükle ve işle (WAV veya MP3)
-    
+    Audio dosyasını yükle ve eğitimdeki ön işlemeyle birebir aynı şekilde işle.
+
     Args:
         audio_bytes: WAV veya MP3 dosyası bytes
-        file_extension: Dosya uzantısı ("wav" veya "mp3")
-    
+        file_extension: Kullanılmıyor (soundfile formatı header'dan algılar);
+            geriye uyumluluk için çağrı imzasında tutuldu.
+
     Returns:
         torch.Tensor: İşlenmiş audio waveform
     """
-    # Librosa hem WAV hem MP3 destekler ve ek bağımlılık gerektirmez
-    wav_np, sr = librosa.load(io.BytesIO(audio_bytes), sr=SR, mono=True)
-    
-    # Numpy'den torch tensor'e çevir ve (1, samples) şekline getir
-    wav = torch.from_numpy(wav_np).unsqueeze(0)
-    
-    # Pad or trim to fixed duration
-    if wav.shape[1] < SAMPLES:
-        wav = torch.nn.functional.pad(wav, (0, SAMPLES - wav.shape[1]))
-    else:
-        wav = wav[:, :SAMPLES]
-    
-    return wav
-
-
-def wav_to_logmel(wav):
-    """
-    Waveform'u log-mel spectrogram'a çevir
-    
-    Args:
-        wav: torch.Tensor waveform
-    
-    Returns:
-        torch.Tensor: Normalize edilmiş log-mel spectrogram
-    """
-    m = mel_spec(wav)
-    m = to_db(m)
-    m = (m - m.mean()) / (m.std() + 1e-6)
-    return m
+    return load_audio_waveform(audio_bytes)
 
 
 def predict_va(model, wav):
