@@ -1,0 +1,21 @@
+experiment_name: cnn_optimized
+seed: 42
+split:
+  train_count: 1261
+  val_count: 271
+  test_count: 270
+training:
+  batch_size: 16
+  epochs: 35
+  lr: 0.0003
+  optimizer: adamw
+  weight_decay: 0.0001
+  dropout: 0.4
+  loss: mse_ccc
+  augmentation: specaugment_noise
+  architecture: optimized
+artifacts:
+  best_model: models\cnn_optimized_best.pt
+  last_model: models\cnn_optimized_last.pt
+  predictions: results\cnn_optimized_predictions.csv
+  history: logs\cnn_optimized_history.csv

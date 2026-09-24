@@ -1,0 +1,19 @@
+experiment_name: cnn_baseline
+seed: 42
+split:
+  train_count: 1261
+  val_count: 271
+  test_count: 270
+audio:
+  sample_rate: 22050
+  duration_sec: 30
+  n_fft: 2048
+  hop_length: 512
+  n_mels: 128
+training:
+  batch_size: 16
+  epochs: 35
+  lr: 0.0001
+optimizer:
+  name: Adam
+  scheduler: ReduceLROnPlateau

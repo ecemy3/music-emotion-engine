@@ -1,0 +1,6 @@
+{
+  "api_enabled": true,
+  "max_image_requests_per_day": 20,
+  "max_retry_per_request": 2,
+  "max_requests_per_session": 10
+}

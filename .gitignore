@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+.env.*
+*.key
+*secret*
+
+# Large / raw data
+data/
+
+# Model checkpoints
+models/*.pt
+
+# Cache
+cache/images/
+
+# Logs
+logs/api_usage.json
+logs/*.tmp
+
+# Audio files
+*.mp3
+*.wav
+
+# Personal data (contains participant names)
+Duygu Durumu Analiz Anketi (Yanıtlar) - Form Yanıtları 1 (3).csv

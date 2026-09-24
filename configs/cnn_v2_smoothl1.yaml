@@ -1,0 +1,21 @@
+experiment_name: cnn_v2_smoothl1
+seed: 42
+split:
+  train_count: 1261
+  val_count: 271
+  test_count: 270
+training:
+  batch_size: 16
+  epochs: 35
+  lr: 0.0003
+  optimizer: adam
+  weight_decay: 1e-05
+  dropout: 0.4
+  loss: smoothl1
+  augmentation: none
+  architecture: baseline
+artifacts:
+  best_model: models\cnn_v2_smoothl1_best.pt
+  last_model: models\cnn_v2_smoothl1_last.pt
+  predictions: results\cnn_v2_smoothl1_predictions.csv
+  history: logs\cnn_v2_smoothl1_history.csv

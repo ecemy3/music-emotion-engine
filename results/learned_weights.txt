@@ -1,0 +1,56 @@
+STACKING ENSEMBLE REPORT
+================================================================================
+
+Data and Validation
+- Samples: 270
+- Base models: cnn_optimized, cnn_baseline, crnn_v2
+- Ground truth source: C:\Users\MONSTER\Desktop\Bitirme_Projesi\ground_truth.csv
+
+Linear Stacking CV Results
+- linear_regression: RMSE(V)=0.812331, RMSE(A)=0.818045, Pearson(V)=0.722582, Pearson(A)=0.776160, CCC(V)=0.690935, CCC(A)=0.758110
+- ridge_alpha_1.0: RMSE(V)=0.811162, RMSE(A)=0.816268, Pearson(V)=0.723446, Pearson(A)=0.777141, CCC(V)=0.690874, CCC(A)=0.758484
+- lasso_alpha_0.001: RMSE(V)=0.812108, RMSE(A)=0.817997, Pearson(V)=0.722728, Pearson(A)=0.776158, CCC(V)=0.690680, CCC(A)=0.757924
+- Selected best stacking model: ridge_alpha_1.0
+
+Learned Weights (fit on full data)
+- linear_regression / valence: cnn_optimized=+0.122151, cnn_baseline=+0.463537, crnn_v2=+0.491431
+  intercept=-0.179648
+- linear_regression / arousal: cnn_optimized=+0.362257, cnn_baseline=+0.376449, crnn_v2=+0.436591
+  intercept=-0.807688
+- ridge_alpha_1.0 / valence: cnn_optimized=+0.151719, cnn_baseline=+0.435238, crnn_v2=+0.485130
+  intercept=-0.155600
+- ridge_alpha_1.0 / arousal: cnn_optimized=+0.365813, cnn_baseline=+0.373178, crnn_v2=+0.434126
+  intercept=-0.797523
+- lasso_alpha_0.001 / valence: cnn_optimized=+0.124612, cnn_baseline=+0.459374, crnn_v2=+0.491215
+  intercept=-0.170417
+- lasso_alpha_0.001 / arousal: cnn_optimized=+0.364185, cnn_baseline=+0.373624, crnn_v2=+0.435985
+  intercept=-0.800615
+
+Diversity Correlation - Valence
+               cnn_optimized  cnn_baseline   crnn_v2
+cnn_optimized       1.000000      0.968349  0.913007
+cnn_baseline        0.968349      1.000000  0.910271
+crnn_v2             0.913007      0.910271  1.000000
+
+Diversity Correlation - Arousal
+               cnn_optimized  cnn_baseline   crnn_v2
+cnn_optimized       1.000000      0.969323  0.916529
+cnn_baseline        0.969323      1.000000  0.907364
+crnn_v2             0.916529      0.907364  1.000000
+
+Required Comparison
+                               model   rmse_v   rmse_a  pearson_v  pearson_a    ccc_v    ccc_a  avg_rmse  avg_pearson  avg_ccc
+                       cnn_optimized 0.844824 0.817367   0.709536   0.778914 0.665076 0.736186  0.831095     0.744225 0.700631
+                        cnn_baseline 0.840444 0.833243   0.715234   0.775717 0.643773 0.710330  0.836844     0.745475 0.677051
+                             crnn_v2 0.849962 0.836310   0.715963   0.767848 0.668553 0.722428  0.843136     0.741905 0.695490
+             simple_average_ensemble 0.824209 0.805186   0.730850   0.792630 0.670710 0.734736  0.814697     0.761740 0.702723
+            weighted_ensemble_manual 0.823913 0.803326   0.731673   0.791120 0.672038 0.740202  0.813620     0.761397 0.706120
+stacking_ensemble_cv_ridge_alpha_1.0 0.811162 0.816268   0.723446   0.777141 0.690874 0.758484  0.813715     0.750294 0.724679
+
+Bonus: RandomForest Stacking
+- RF CV: RMSE(V)=0.865419, RMSE(A)=0.879821, Pearson(V)=0.682616, Pearson(A)=0.740413
+- RF Train: RMSE(V)=0.444428, RMSE(A)=0.416076, Pearson(V)=0.932887, Pearson(A)=0.951234
+- RF overfitting gap avg_rmse(train-cv)=-0.442369
+
+Overfitting Check - Selected Stacking
+- CV avg_rmse=0.813715, Train avg_rmse=0.794869, gap(train-cv)=-0.018846

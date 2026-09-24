@@ -1,0 +1,26 @@
+experiment_name,seed,train_count,val_count,test_count,config_path,split_path,optimizer,lr,dropout,weight_decay,loss,augmentation,architecture,notes
+cnn_baseline,42,1261,271,270,configs\cnn_baseline.yaml,configs\fixed_split_seed42.csv,,,,,,,,
+cnn_v2_opt_adam,42,1261,271,270,configs\cnn_v2_opt_adam.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,baseline,optimizer adam
+cnn_v2_opt_adamw,42,1261,271,270,configs\cnn_v2_opt_adamw.yaml,configs\fixed_split_seed42.csv,adamw,0.0003,0.4,1e-05,mse,none,baseline,optimizer adamw
+cnn_v2_lr_1e3,42,1261,271,270,configs\cnn_v2_lr_1e3.yaml,configs\fixed_split_seed42.csv,adam,0.001,0.4,1e-05,mse,none,baseline,lr 1e-3
+cnn_v2_lr_3e4,42,1261,271,270,configs\cnn_v2_lr_3e4.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,baseline,lr 3e-4
+cnn_v2_lr_1e4,42,1261,271,270,configs\cnn_v2_lr_1e4.yaml,configs\fixed_split_seed42.csv,adam,0.0001,0.4,1e-05,mse,none,baseline,lr 1e-4
+cnn_v2_dropout_03,42,1261,271,270,configs\cnn_v2_dropout_03.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.3,1e-05,mse,none,baseline,dropout 0.3
+cnn_v2_dropout_04,42,1261,271,270,configs\cnn_v2_dropout_04.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,baseline,dropout 0.4
+cnn_v2_dropout_05,42,1261,271,270,configs\cnn_v2_dropout_05.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.5,1e-05,mse,none,baseline,dropout 0.5
+cnn_v2_wd_0,42,1261,271,270,configs\cnn_v2_wd_0.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,0.0,mse,none,baseline,weight decay 0
+cnn_v2_wd_1e5,42,1261,271,270,configs\cnn_v2_wd_1e5.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,baseline,weight decay 1e-5
+cnn_v2_wd_1e4,42,1261,271,270,configs\cnn_v2_wd_1e4.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,0.0001,mse,none,baseline,weight decay 1e-4
+cnn_v2_noaug,42,1261,271,270,configs\cnn_v2_noaug.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,baseline,v2 no augmentation
+cnn_v2_specaugment,42,1261,271,270,configs\cnn_v2_specaugment.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,specaugment,baseline,specaugment
+cnn_v2_specaugment_noise,42,1261,271,270,configs\cnn_v2_specaugment_noise.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,specaugment_noise,baseline,specaugment + mild noise
+cnn_v2_mse,42,1261,271,270,configs\cnn_v2_mse.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,baseline,loss mse
+cnn_v2_smoothl1,42,1261,271,270,configs\cnn_v2_smoothl1.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,smoothl1,none,baseline,loss smoothl1
+cnn_v2_mse_ccc,42,1261,271,270,configs\cnn_v2_mse_ccc.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse_ccc,none,baseline,loss mse + ccc
+cnn_optimized,42,1261,271,270,configs\cnn_optimized.yaml,configs\fixed_split_seed42.csv,adamw,0.0003,0.4,0.0001,mse_ccc,specaugment_noise,optimized,deeper cnn 32-64-128-256
+crnn_v1,42,1261,271,270,configs\crnn_v1.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,,crnn v1 simple
+crnn_v1_bilstm,42,1261,271,270,configs\crnn_v1_bilstm.yaml,configs\fixed_split_seed42.csv,adam,0.0003,0.4,1e-05,mse,none,,crnn v1 bilstm
+crnn_v2,42,1261,271,270,configs\crnn_v2.yaml,configs\fixed_split_seed42.csv,adam,0.001,0.3,1e-05,mse_ccc,specaugment,,crnn v2: stronger cnn + bilstm(2) + mse_ccc + specaugment
+transformer_v1,42,1261,271,270,configs\transformer_v1.yaml,configs\fixed_split_seed42.csv,adamw,0.0003,0.3,0.0001,mse_ccc,specaugment_noise,,audio transformer baseline
+transformer_v2,42,1261,271,270,configs\transformer_v2.yaml,configs\fixed_split_seed42.csv,adamw,0.0001,0.4,0.0001,mse_ccc,specaugment,,audio transformer v2: lower lr + higher dropout + specaugment
+cnn_transformer_v1,42,1261,271,270,configs\cnn_transformer_v1.yaml,configs\fixed_split_seed42.csv,adamw,0.0003,0.3,0.0001,mse_ccc,specaugment_noise,,cnn + transformer hybrid

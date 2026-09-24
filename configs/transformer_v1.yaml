@@ -1,0 +1,24 @@
+experiment_name: transformer_v1
+seed: 42
+split:
+  train_count: 1261
+  val_count: 271
+  test_count: 270
+training:
+  batch_size: 16
+  epochs: 80
+  lr: 0.0003
+  optimizer: adamw
+  weight_decay: 0.0001
+  dropout: 0.3
+  loss: mse_ccc
+  augmentation: specaugment_noise
+model:
+  hidden_size: 256
+  num_layers: 4
+  bidirectional: True
+artifacts:
+  best_model: models\transformer_v1_best.pt
+  last_model: models\transformer_v1_last.pt
+  predictions: results\transformer_v1_predictions.csv
+  history: logs\transformer_v1_history.csv
