@@ -8,7 +8,12 @@ pencereleme + agregasyon katmanı ekler:
 
   - Parça baştan sona (kesilmeden) eğitimdeki gibi okunur (22050 Hz, mono).
   - 30 saniyelik pencerelere bölünür (model 30 sn ile eğitildi), pencere
-    kayması 15 sn (%50 örtüşme).
+    kayması 15 sn (%50 örtüşme). Parça 30 sn'den uzunsa pencereler 0, 15,
+    30, ... şeklinde ilerler; son normal pencere parçanın sonuna
+    ulaşmıyorsa parçanın sonuna hizalanan (bir önceki pencereyle büyük
+    ölçüde örtüşebilen) ek bir pencere daha eklenir - böylece 30 sn'den
+    uzun hiçbir parçada dolgu (padding) OLMAZ. Parça 30 sn'den kısaysa tek
+    pencere, gerektiği kadar sıfır ile pad'lenir (mevcut davranış).
   - Her pencerenin ham (normalize edilmemiş) RMS enerjisi hesaplanır; bu
     enerji sabit bir eşiğin altındaysa pencere "sessiz" sayılıp tahmine
     katılmaz. Bu kontrol örnek-bazlı normalizasyondan (wav_to_logmel içindeki
@@ -38,7 +43,6 @@ WINDOW_SEC = float(DURATION)  # 30 sn - modelin eğitildiği pencere uzunluğu
 HOP_SEC = 15.0  # %50 örtüşme
 WINDOW_SAMPLES = int(WINDOW_SEC * SR)
 HOP_SAMPLES = int(HOP_SEC * SR)
-MIN_TAIL_SAMPLES = int(HOP_SEC * SR)  # son pencere bundan kısaysa atılır
 
 # Ham dalga formu üzerinde (normalizasyondan önce) RMS enerji eşiği.
 # 0.01 ~ -40 dBFS: yaygın kullanılan, mutlak (dosyaya göre değişmeyen) bir
@@ -54,6 +58,7 @@ class WindowPrediction:
     end_sec: float
     rms: float
     skipped: bool
+    padding_ratio: float = 0.0
     valence: Optional[float] = None
     arousal: Optional[float] = None
 
@@ -78,6 +83,7 @@ class MultiWindowResult:
                 "end_sec": w.end_sec,
                 "rms": w.rms,
                 "skipped": w.skipped,
+                "padding_ratio": w.padding_ratio,
                 "valence": w.valence,
                 "arousal": w.arousal,
             }
@@ -118,34 +124,38 @@ def _load_full_waveform(path_or_bytes: AudioInput) -> torch.Tensor:
 
 
 def _build_windows(wav: torch.Tensor):
-    """wav: (1, total_samples). (start_sample, end_sample, pencere_tensörü) listesi döndürür.
+    """wav: (1, total_samples). (start_sample, end_sample, pencere_tensörü, pad_sample_sayısı) listesi döndürür.
 
     end_sample, pad edilmemiş asıl içerik sınırıdır (pencere tensörü pad
     edilmiş olsa bile zaman çizelgesinde gerçek süre gösterilsin diye).
+
+    Parça WINDOW_SAMPLES'tan uzunsa hiçbir pencere pad edilmez: pencereler
+    0, HOP, 2*HOP, ... şeklinde ilerler; son normal pencere parçanın
+    sonuna ulaşmıyorsa parçanın sonuna hizalanan (bir öncekiyle büyük
+    ölçüde örtüşebilen) ek bir pencere eklenir.
     """
     total_samples = wav.shape[1]
     windows = []
 
     if total_samples <= WINDOW_SAMPLES:
         w = wav
-        if total_samples < WINDOW_SAMPLES:
-            w = torch.nn.functional.pad(w, (0, WINDOW_SAMPLES - total_samples))
-        windows.append((0, total_samples, w))
+        pad_amount = WINDOW_SAMPLES - total_samples
+        if pad_amount > 0:
+            w = torch.nn.functional.pad(w, (0, pad_amount))
+        windows.append((0, total_samples, w, pad_amount))
         return windows
 
     start = 0
-    while start < total_samples:
+    last_end = 0
+    while start + WINDOW_SAMPLES <= total_samples:
         end = start + WINDOW_SAMPLES
-        if end <= total_samples:
-            windows.append((start, end, wav[:, start:end]))
-            start += HOP_SAMPLES
-        else:
-            remaining = total_samples - start
-            if remaining < MIN_TAIL_SAMPLES:
-                break
-            w = torch.nn.functional.pad(wav[:, start:], (0, WINDOW_SAMPLES - remaining))
-            windows.append((start, total_samples, w))
-            break
+        windows.append((start, end, wav[:, start:end], 0))
+        last_end = end
+        start += HOP_SAMPLES
+
+    if last_end < total_samples:
+        tail_start = total_samples - WINDOW_SAMPLES
+        windows.append((tail_start, total_samples, wav[:, tail_start:total_samples], 0))
 
     return windows
 
@@ -194,7 +204,7 @@ def predict_multi_window(
     raw_windows = _build_windows(wav)
 
     entries = []
-    for start, end, w in raw_windows:
+    for start, end, w, pad_amount in raw_windows:
         rms = _rms(w)
         entries.append(
             {
@@ -202,6 +212,7 @@ def predict_multi_window(
                 "end": end,
                 "wav": w,
                 "rms": rms,
+                "padding_ratio": pad_amount / WINDOW_SAMPLES,
                 "skipped": rms < SILENCE_RMS_THRESHOLD,
             }
         )
@@ -229,6 +240,7 @@ def predict_multi_window(
             end_sec=e["end"] / SR,
             rms=e["rms"],
             skipped=e["skipped"],
+            padding_ratio=e["padding_ratio"],
             valence=e.get("valence"),
             arousal=e.get("arousal"),
         )
