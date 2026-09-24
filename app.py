@@ -66,6 +66,7 @@ from src.flux_image_generator import (
 )
 from src.art_dna_engine import analyze_art_dna
 from src.audio_preprocessing import load_audio_waveform, wav_to_logmel
+from src.inference import predict_multi_window, WINDOW_SEC, HOP_SEC
 
 
 load_dotenv()
@@ -652,53 +653,83 @@ def predict_with_selected_model(selected_model_runtime, wav):
     return float(weighted_v), float(weighted_a)
 
 
+def _human_stats_for_song(song_name, df, song_col="Hangi müziği dinlediniz"):
+    """Bir şarkı için anketten insan Valence/Arousal istatistiklerini hesapla."""
+    selected_key = normalize_song_name(song_name)
+    song_df = df[df[song_col].apply(normalize_song_name) == selected_key]
+
+    if len(song_df) == 0:
+        return None
+
+    hv_list, ha_list = [], []
+    for _, row in song_df.iterrows():
+        hv, ha = survey_row_to_va(row)
+        hv_list.append(hv)
+        ha_list.append(ha)
+
+    return {
+        "Human_Valence_Mean": np.mean(hv_list),
+        "Human_Arousal_Mean": np.mean(ha_list),
+        "Human_Valence_Std": np.std(hv_list),
+        "Human_Arousal_Std": np.std(ha_list),
+        "N_Responses": len(song_df),
+    }
+
+
 def compare(song_name, audio_bytes, df, selected_model_runtime, file_extension="wav", song_col="Hangi müziği dinlediniz"):
     """
-    İnsan ve model tahminlerini karşılaştır
-    
+    İnsan ve model tahminlerini karşılaştır (eski davranış: sadece ilk 30 sn).
+
     Args:
         song_name: Şarkı adı
         audio_bytes: WAV veya MP3 dosyası bytes
         df: Anket verileri DataFrame
         selected_model_runtime: Seçili model çalışma bilgisi
         file_extension: Dosya uzantısı ("wav" veya "mp3")
-    
+
     Returns:
         dict: Karşılaştırma sonuçları
     """
     # Model tahmini
     wav = load_audio(audio_bytes, file_extension)
     mv, ma = predict_with_selected_model(selected_model_runtime, wav)
-    
-    # İnsan tahminleri (anket)
-    selected_key = normalize_song_name(song_name)
-    song_df = df[df[song_col].apply(normalize_song_name) == selected_key]
-    
-    if len(song_df) == 0:
+
+    human = _human_stats_for_song(song_name, df, song_col)
+    if human is None:
         return None
-    
-    hv_list, ha_list = [], []
-    for _, row in song_df.iterrows():
-        hv, ha = survey_row_to_va(row)
-        hv_list.append(hv)
-        ha_list.append(ha)
-    
-    hv_mean = np.mean(hv_list)
-    ha_mean = np.mean(ha_list)
-    hv_std = np.std(hv_list)
-    ha_std = np.std(ha_list)
-    
+
     return {
         "Model_Valence": mv,
         "Model_Arousal": ma,
-        "Human_Valence_Mean": hv_mean,
-        "Human_Arousal_Mean": ha_mean,
-        "Human_Valence_Std": hv_std,
-        "Human_Arousal_Std": ha_std,
-        "Delta_V": abs(hv_mean - mv),
-        "Delta_A": abs(ha_mean - ma),
-        "N_Responses": len(song_df)
+        "Delta_V": abs(human["Human_Valence_Mean"] - mv),
+        "Delta_A": abs(human["Human_Arousal_Mean"] - ma),
+        **human,
     }
+
+
+def compare_multi_window(song_name, audio_bytes, df, selected_model_runtime, song_col="Hangi müziği dinlediniz"):
+    """
+    İnsan ve model tahminlerini karşılaştır - parçanın tamamını 30 sn / %50
+    örtüşmeli pencerelerle analiz ederek (src/inference.py).
+
+    Returns:
+        tuple: (dict veya None, MultiWindowResult) - karşılaştırma sonucu ve
+        zaman çizelgesi çizimi için tam pencere detayları.
+    """
+    result = predict_multi_window(audio_bytes, selected_model_runtime, device=DEVICE)
+
+    human = _human_stats_for_song(song_name, df, song_col)
+    if human is None:
+        return None, result
+
+    comparison = {
+        "Model_Valence": result.valence,
+        "Model_Arousal": result.arousal,
+        "Delta_V": abs(human["Human_Valence_Mean"] - result.valence),
+        "Delta_A": abs(human["Human_Arousal_Mean"] - result.arousal),
+        **human,
+    }
+    return comparison, result
 
 
 @st.cache_resource
@@ -1233,27 +1264,43 @@ def render_model_comparison_tab(df, selected_model_runtime, song_col):
     with col2:
         # Audio upload
         audio = st.file_uploader(" Şarkı Dosyasını Yükle (.wav, .mp3)", type=["wav", "mp3"])
-    
+        use_old_behavior = st.checkbox(
+            "Sadece ilk 30 sn (eski davranış)",
+            value=False,
+            help="Kapalıyken parçanın tamamı 30 sn / %50 örtüşmeli pencerelerle analiz edilir. "
+                 "İşaretlenirse karşılaştırma için sadece parçanın ilk 30 saniyesi kullanılır.",
+        )
+
     # Karşılaştırma butonu
     if st.button("Karşılaştır", type="primary", use_container_width=True):
         if audio is None:
             st.warning("Lütfen şarkı dosyasını yükleyin (.wav veya .mp3)")
             return
-        
+
         with st.spinner("Analiz ediliyor..."):
             # Dosya uzantısını tespit et
             file_ext = audio.name.split('.')[-1].lower()
-            
+
             # Karşılaştırmayı yap
-            res = compare(
-                song,
-                audio.getvalue(),
-                df,
-                selected_model_runtime,
-                file_ext,
-                song_col=song_col,
-            )
-            
+            mw_result = None
+            if use_old_behavior:
+                res = compare(
+                    song,
+                    audio.getvalue(),
+                    df,
+                    selected_model_runtime,
+                    file_ext,
+                    song_col=song_col,
+                )
+            else:
+                res, mw_result = compare_multi_window(
+                    song,
+                    audio.getvalue(),
+                    df,
+                    selected_model_runtime,
+                    song_col=song_col,
+                )
+
             if res is None:
                 st.error("Seçilen şarkı için anket verisi bulunamadı")
                 return
@@ -1416,7 +1463,40 @@ def render_model_comparison_tab(df, selected_model_runtime, song_col):
                 ax.axvline(5, color='gray', linewidth=0.5, alpha=0.5)
                 
                 st.pyplot(fig)
-            
+
+            # Zaman içinde Valence/Arousal (sadece çoklu pencere modunda)
+            if mw_result is not None:
+                st.markdown("---")
+                st.subheader("Zaman İçinde Valence / Arousal")
+
+                timeline_df = pd.DataFrame(mw_result.to_records())
+                plotted_df = timeline_df[~timeline_df["skipped"]].copy()
+
+                if plotted_df.empty:
+                    st.warning("Tüm pencereler sessiz kabul edildiği için zaman çizelgesi çizilemedi.")
+                else:
+                    plotted_df["Zaman (sn)"] = plotted_df["start_sec"].round(1)
+                    st.line_chart(
+                        plotted_df.set_index("Zaman (sn)")[["valence", "arousal"]].rename(
+                            columns={"valence": "Valence", "arousal": "Arousal"}
+                        )
+                    )
+
+                caption = (
+                    f"{mw_result.n_windows_total} pencere ({WINDOW_SEC:.0f} sn pencere, {HOP_SEC:.0f} sn kayma), "
+                    f"{mw_result.n_windows_used} tanesi kullanıldı, "
+                    f"{mw_result.n_windows_skipped} tanesi sessiz kabul edilip atlandı. "
+                    f"Genel skor ± pencereler arası std: "
+                    f"V={mw_result.valence:.2f}±{mw_result.valence_std:.2f}, "
+                    f"A={mw_result.arousal:.2f}±{mw_result.arousal_std:.2f}."
+                )
+                if mw_result.used_all_windows_fallback:
+                    caption += " (Tüm pencereler sessiz görünüyordu, güvenlik için hepsi kullanıldı.)"
+                st.caption(caption)
+
+                with st.expander("Pencere bazlı detaylar"):
+                    st.dataframe(timeline_df, use_container_width=True)
+
             # DynamoDB Local'e kaydet
             model_label = selected_model_runtime.get("type", "unknown")
             if model_label == "ensemble":
