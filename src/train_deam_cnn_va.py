@@ -12,11 +12,20 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-import torchaudio
-import soundfile as sf
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
+
+from audio_preprocessing import (
+    load_audio_waveform as load_audio,
+    wav_to_logmel,
+    SR,
+    DURATION,
+    SAMPLES,
+    N_FFT,
+    HOP,
+    N_MELS,
+)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -44,25 +53,12 @@ SPLIT_OUT = os.path.join(CONFIGS_DIR, "fixed_split_seed42.csv")
 EXPERIMENT_LOG_OUT = os.path.join(LOGS_DIR, "experiment_log.csv")
 README_EXPERIMENTS_OUT = "README_experiments.md"
 
-SR = 22050
-DURATION = 30
-SAMPLES = SR * DURATION
-
-N_FFT = 2048
-HOP = 512
-N_MELS = 128
-
 BATCH_SIZE = 16
 EPOCHS = 35
 LR = 1e-4
 SEED = 42
 TEST_SIZE = 0.15
 VAL_SIZE_TOTAL = 0.15
-
-mel_spec = torchaudio.transforms.MelSpectrogram(
-    sample_rate=SR, n_fft=N_FFT, hop_length=HOP, n_mels=N_MELS
-)
-to_db = torchaudio.transforms.AmplitudeToDB()
 
 
 def set_seed(seed: int):
@@ -77,34 +73,6 @@ def set_seed(seed: int):
 def ensure_dirs():
     for directory in [MODELS_DIR, LOGS_DIR, RESULTS_DIR, CONFIGS_DIR]:
         os.makedirs(directory, exist_ok=True)
-
-def load_audio(path):
-    # soundfile ile WAV dosyasını yükle
-    wav, sr = sf.read(path, dtype='float32')
-    # Numpy array'den torch tensor'e çevir
-    wav = torch.from_numpy(wav)
-    
-    # Eğer stereo ise (samples, 2) mono'ya çevir
-    if wav.ndim == 2:
-        wav = torch.mean(wav, dim=1)  # Ortalama al
-    
-    # (samples,) -> (1, samples) şekline dönüştür
-    wav = wav.unsqueeze(0)
-    
-    if sr != SR:
-        wav = torchaudio.functional.resample(wav, sr, SR)
-
-    if wav.shape[1] < SAMPLES:
-        wav = torch.nn.functional.pad(wav, (0, SAMPLES - wav.shape[1]))
-    else:
-        wav = wav[:, :SAMPLES]
-    return wav
-
-def wav_to_logmel(wav):
-    m = mel_spec(wav)
-    m = to_db(m)
-    m = (m - m.mean()) / (m.std() + 1e-6)
-    return m
 
 def compute_metrics(y_true, y_pred):
     """RMSE ve Pearson Correlation hesapla (valence ve arousal için ayrı)"""
