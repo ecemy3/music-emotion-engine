@@ -1,0 +1,28 @@
+# Etiket -> Valence/Arousal (1-9 ölçeği, DEAM anotasyonlarıyla aynı ölçek)
+# eşlemeleri.
+#
+# BUNLAR İLK VARSAYIMLARDIR (Russell'ın duygu çemberi/circumplex modeline
+# dayanarak elle belirlendi). Gerçek anket verisiyle (bkz. "Duygu Durumu
+# Analiz Anketi" - ör. "Sizce bu müzik parçası hangi duyguyu en çok
+# yansıtıyor?" sorusundaki insan etiketlemeleri) kalibre edilene kadar
+# geçicidir. Kalibrasyon yapılınca bu dosyadaki sayılar güncellenmeli.
+
+sakin-huzurlu:
+  valence: 6.0
+  arousal: 2.5
+
+sıcak-nostaljik:
+  valence: 6.5
+  arousal: 4.0
+
+enerjik-pozitif:
+  valence: 7.5
+  arousal: 7.5
+
+gergin-dramatik:
+  valence: 3.0
+  arousal: 7.0
+
+hüzünlü-duygusal:
+  valence: 3.0
+  arousal: 3.0
