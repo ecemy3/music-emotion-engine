@@ -67,6 +67,14 @@ from src.flux_image_generator import (
 from src.art_dna_engine import analyze_art_dna
 from src.audio_preprocessing import load_audio_waveform, wav_to_logmel
 from src.inference import predict_multi_window, WINDOW_SEC, HOP_SEC
+from src.ranking import (
+    CLOSE_WINDOW_THRESHOLD,
+    INDISTINGUISHABLE_THRESHOLD,
+    load_emotion_targets,
+    rank_candidates,
+    resolve_target,
+    score_candidate,
+)
 
 
 load_dotenv()
@@ -1172,7 +1180,7 @@ def main():
         st.sidebar.caption("Başlatmak için: `docker-compose up -d`")
 
     # TAB YAPISI
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "Model Karşılaştırma",
         "Şarkı Bazlı Karşılaştırma",
         "Demografik Analiz",
@@ -1181,6 +1189,7 @@ def main():
         "İnsan vs Seçili Model vs Gemini",
         "🎨 Şarkının Art DNA Görselleştirmesi",
         "Geçmiş Analizler",
+        "Müzik Seçim Testi",
     ])
     
     # TAB 1: Genel model performans karşılaştırması
@@ -1219,6 +1228,10 @@ def main():
     # TAB 8: Geçmiş Analizler (DynamoDB Local)
     with tab8:
         render_history_tab()
+
+    # TAB 9: Müzik Seçim Testi (aday müzikleri hedef duyguya göre sırala)
+    with tab9:
+        render_music_selection_tab(selected_model_runtime)
 
 
 def render_model_comparison_tab(df, selected_model_runtime, song_col):
@@ -1529,6 +1542,171 @@ def render_model_comparison_tab(df, selected_model_runtime, song_col):
                     "Valence Farkı": f"{res['Delta_V']:.2f}",
                     "Arousal Farkı": f"{res['Delta_A']:.2f}"
                 })
+
+
+def render_music_selection_tab(selected_model_runtime):
+    """Bir reklam/içerik için birden fazla aday müziği hedeflenen duyguya göre sıralar."""
+    st.subheader("Müzik Seçim Testi")
+
+    st.info("""
+    **Bu sekmede ne yapıyoruz?**
+
+    Bir reklam ya da içerik için birden fazla aday müzik yükleyin ve hedeflediğiniz
+    duyguyu (Valence-Arousal) seçin. Her aday, parçanın tamamı 30 sn / %50 örtüşmeli
+    pencerelerle analiz edilir (bkz. "Şarkı Bazlı Karşılaştırma" sekmesindeki çoklu
+    pencere yöntemi) ve hedefe olan uzaklığına göre sıralanır.
+
+    Modelin ortalama hata payı (RMSE) yaklaşık 0.8 olduğu için, uzaklıkları
+    birbirinden çok az farklı adaylar **"istatistiksel olarak ayırt edilemez"**
+    işaretlenir - aralarında kesin bir kazanan ilan etmek yanıltıcı olur.
+    """)
+
+    uploaded_files = st.file_uploader(
+        "Aday müzikleri yükleyin (2-10 dosya, .wav/.mp3)",
+        type=["wav", "mp3"],
+        accept_multiple_files=True,
+        key="music_selection_files",
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        target_mode = st.radio(
+            "Hedef duygu nasıl belirlensin?",
+            ["Hazır etiket", "Manuel Valence/Arousal"],
+            key="ms_target_mode",
+        )
+
+    targets = load_emotion_targets()
+    if target_mode == "Hazır etiket":
+        with col2:
+            target_label = st.selectbox("Hedef etiket", sorted(targets.keys()), key="ms_target_label")
+        target_v, target_a = resolve_target(target_label=target_label, targets=targets)
+    else:
+        with col2:
+            target_v = st.slider("Hedef Valence", 1.0, 9.0, 5.0, 0.1, key="ms_target_v")
+            target_a = st.slider("Hedef Arousal", 1.0, 9.0, 5.0, 0.1, key="ms_target_a")
+
+    st.caption(f"Hedef: Valence={target_v:.2f}, Arousal={target_a:.2f}")
+
+    n_files = len(uploaded_files) if uploaded_files else 0
+    if uploaded_files and not (2 <= n_files <= 10):
+        st.warning(f"Lütfen 2 ile 10 arasında dosya yükleyin (şu an {n_files}).")
+
+    if st.button("Sırala", type="primary", use_container_width=True, disabled=not uploaded_files):
+        if not (2 <= n_files <= 10):
+            st.error("2 ile 10 arasında dosya yüklemelisiniz.")
+            return
+
+        with st.spinner(f"{n_files} aday analiz ediliyor..."):
+            candidates = []
+            for f in uploaded_files:
+                try:
+                    mw = predict_multi_window(f.getvalue(), selected_model_runtime, device=DEVICE)
+                    candidates.append(score_candidate(f.name, mw, target_v, target_a))
+                except Exception as exc:
+                    st.error(f"{f.name} işlenemedi: {exc}")
+
+            if not candidates:
+                st.error("Hiçbir aday işlenemedi.")
+                return
+
+            ranked = rank_candidates(candidates)
+
+        st.session_state["music_selection_ranked"] = ranked
+        st.session_state["music_selection_target"] = (target_v, target_a)
+
+    ranked = st.session_state.get("music_selection_ranked")
+    stored_target = st.session_state.get("music_selection_target")
+    if not ranked or stored_target is None:
+        return
+
+    result_target_v, result_target_a = stored_target
+
+    st.markdown("---")
+    st.subheader("Sonuçlar")
+
+    table_rows = []
+    for c in ranked:
+        if c.rank == 1:
+            flag = "—"
+        elif c.indistinguishable_from_best:
+            flag = "⚠️ Evet"
+        else:
+            flag = "Hayır"
+        table_rows.append(
+            {
+                "Sıra": c.rank,
+                "Dosya": c.name,
+                "Valence": round(c.valence, 2),
+                "Arousal": round(c.arousal, 2),
+                "Hedefe Uzaklık": round(c.distance, 3),
+                "Tutarlılık (std)": round(c.consistency, 3),
+                "Hedefe Yakın Pencere %": round(c.pct_windows_close, 1),
+                "Pencere Sayısı": c.n_windows_used,
+                "En İyiyle Ayırt Edilemez": flag,
+            }
+        )
+    result_df = pd.DataFrame(table_rows)
+    st.dataframe(result_df, use_container_width=True, hide_index=True)
+
+    n_indist = sum(1 for c in ranked if c.indistinguishable_from_best)
+    if n_indist > 1:
+        indist_names = ", ".join(c.name for c in ranked if c.indistinguishable_from_best)
+        st.warning(
+            f"{n_indist} aday istatistiksel olarak ayırt edilemez "
+            f"(uzaklık farkı < {INDISTINGUISHABLE_THRESHOLD}): {indist_names}"
+        )
+
+    csv_bytes = result_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "Sonuçları CSV olarak indir",
+        data=csv_bytes,
+        file_name="muzik_secim_testi_sonuclari.csv",
+        mime="text/csv",
+    )
+
+    # VA düzlemi grafiği
+    st.markdown("---")
+    st.subheader("VA Düzleminde Adaylar")
+    fig, ax = plt.subplots(figsize=(7, 7))
+    for c in ranked:
+        ax.scatter(c.valence, c.arousal, s=150, alpha=0.8, label=f"{c.rank}. {c.name}")
+        ax.annotate(str(c.rank), (c.valence, c.arousal), textcoords="offset points", xytext=(6, 6))
+    ax.scatter([result_target_v], [result_target_a], s=250, marker="*", c="red", label="Hedef", zorder=5)
+    ax.set_xlim(1, 9)
+    ax.set_ylim(1, 9)
+    ax.set_xlabel("Valence (Negatif ← → Pozitif)")
+    ax.set_ylabel("Arousal (Sakin ← → Enerjik)")
+    ax.set_title("Aday Müzikler ve Hedef")
+    ax.axhline(5, color="gray", linewidth=0.5, alpha=0.5)
+    ax.axvline(5, color="gray", linewidth=0.5, alpha=0.5)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8, loc="upper left", bbox_to_anchor=(1.02, 1.0))
+    st.pyplot(fig)
+
+    # Zaman içinde tüm adayların üst üste çizelgesi
+    st.markdown("---")
+    st.subheader("Zaman İçinde Valence / Arousal (tüm adaylar)")
+    metric_choice = st.radio("Metrik", ["Valence", "Arousal"], horizontal=True, key="ms_timeline_metric")
+    value_col = "valence" if metric_choice == "Valence" else "arousal"
+    target_value = result_target_v if metric_choice == "Valence" else result_target_a
+
+    timeline_rows = []
+    for c in ranked:
+        for rec in c.multi_window_result.to_records():
+            if rec["skipped"]:
+                continue
+            timeline_rows.append(
+                {"Zaman (sn)": round(rec["start_sec"], 1), "Aday": c.name, "Değer": rec[value_col]}
+            )
+
+    if timeline_rows:
+        timeline_long_df = pd.DataFrame(timeline_rows)
+        pivot_df = timeline_long_df.pivot_table(index="Zaman (sn)", columns="Aday", values="Değer", aggfunc="mean")
+        pivot_df[f"Hedef ({metric_choice})"] = target_value
+        st.line_chart(pivot_df)
+    else:
+        st.warning("Zaman çizelgesi için kullanılabilir pencere yok.")
 
 
 def render_demographic_tab(df):
