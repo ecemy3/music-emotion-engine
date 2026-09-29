@@ -8,9 +8,11 @@ V/yüksek A, yüksek V/düşük A, orta V/orta A). Hedef, bunlardan birinin
 sırada ya da "ayırt edilemez" grupta çıkması beklenir.
 
 Kullanım:
-    python scripts/validate_ranking.py
+    python scripts/validate_ranking.py                  # varsayılan: ensemble
+    python scripts/validate_ranking.py --model clap_head # CLAP-tabanlı model
 """
 
+import argparse
 import os
 import sys
 import time
@@ -28,7 +30,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_DIR = os.path.join(REPO_ROOT, "src")
 sys.path.insert(0, SRC_DIR)
 
-from inference import predict_multi_window  # noqa: E402
+from inference import load_clap_head_runtime, predict_multi_window  # noqa: E402
 from ranking import INDISTINGUISHABLE_THRESHOLD, rank_candidates, score_candidate  # noqa: E402
 from train_cnn_experiments import CNNVA  # noqa: E402
 from train_crnn_experiments import CRNNVA  # noqa: E402
@@ -38,6 +40,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 AUDIO_DIR = os.path.join(REPO_ROOT, "data", "deam", "audio")
 ANN_PATH = os.path.join(REPO_ROOT, "data", "deam", "annotations.csv")
 MODELS_DIR = os.path.join(REPO_ROOT, "models")
+CLAP_HEAD_CKPT = os.path.join(MODELS_DIR, "clap_head_best.pt")
 
 ENSEMBLE_COMPONENTS = ("cnn_optimized", "cnn_baseline", "crnn_v2")
 ENSEMBLE_WEIGHTS = {"cnn_optimized": 0.30, "cnn_baseline": 0.30, "crnn_v2": 0.40}
@@ -72,10 +75,26 @@ def load_ensemble_models():
     return models
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="src/ranking.py doğrulaması")
+    parser.add_argument("--model", choices=["ensemble", "clap_head"], default="ensemble")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     ann = pd.read_csv(ANN_PATH).set_index("song_id")
-    models = load_ensemble_models()
-    runtime = {"type": "ensemble", "models": models, "weights": ENSEMBLE_WEIGHTS}
+
+    if args.model == "clap_head":
+        if not os.path.exists(CLAP_HEAD_CKPT):
+            print(f"HATA: {CLAP_HEAD_CKPT} bulunamadı. Önce src/train_clap_head.py --sweep çalıştırılmalı.")
+            return
+        runtime = load_clap_head_runtime(CLAP_HEAD_CKPT, device=DEVICE)
+        print(f"Model: clap_head ({CLAP_HEAD_CKPT})\n")
+    else:
+        models = load_ensemble_models()
+        runtime = {"type": "ensemble", "models": models, "weights": ENSEMBLE_WEIGHTS}
+        print("Model: ensemble (cnn_optimized 0.30, cnn_baseline 0.30, crnn_v2 0.40)\n")
 
     target_row = ann.loc[TARGET_SONG_ID]
     target_v, target_a = float(target_row["valence"]), float(target_row["arousal"])

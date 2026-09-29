@@ -16,3 +16,7 @@ boto3>=1.28.0
 requests>=2.31.0
 PyYAML>=6.0.0
 pytest>=7.4.0
+# transformers==4.44.2 pinlendi: laion/clap-htsat-unfused checkpoint'i
+# safetensors formatında değil, transformers>=4.50 civarı bu yüzden (torch
+# 2.6+ olmadan) yüklemeyi reddediyor (CVE-2025-32434 güvenlik kısıtı).
+transformers==4.44.2

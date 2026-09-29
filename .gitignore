@@ -18,6 +18,7 @@ models/*.pt
 
 # Cache
 cache/images/
+cache/embeddings/
 
 # Logs
 logs/api_usage.json

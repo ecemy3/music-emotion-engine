@@ -25,6 +25,12 @@ pencereleme + agregasyon katmanı ekler:
     de eğitimdekiyle birebir aynıdır), pencereler batch halinde modele verilir.
   - Genel Valence/Arousal, sessiz olmayan pencerelerin ortalaması; ayrıca
     pencereler arası standart sapma ve tam zaman çizelgesi döndürülür.
+
+Ek olarak "clap_head" model tipi desteklenir (src/train_clap_head.py ile
+eğitilen CLAP-tabanlı model). Bu, YUKARIDAKİ mel-spektrogram hattını hiç
+kullanmaz - kendi 48 kHz / 10 sn pencere / 5 sn kayma hattına sahiptir
+(bkz. src/embeddings.py). Mevcut "single"/"ensemble" davranışı ve
+varsayılan model seçimi DEĞİŞTİRİLMEDİ; bu sadece ek bir seçenektir.
 """
 
 import io
@@ -188,18 +194,154 @@ def _forward_ensemble(selected_model_runtime: dict, mel_batch: torch.Tensor):
     return weighted_v, weighted_a
 
 
+def _predict_multi_window_clap(
+    path_or_bytes: AudioInput,
+    runtime: dict,
+    device: str = "cpu",
+) -> MultiWindowResult:
+    """
+    "clap_head" model tipi için ayrı çıkarım yolu: CLAP'ın kendi 48 kHz /
+    10 sn pencere / 5 sn kayma hattını kullanır (src/embeddings.py ile
+    aynı pencereleme mantığı - dolgu yok, son pencere sona hizalı).
+    Mel-spektrogram hattına (yukarıdaki fonksiyonlar) hiç dokunmaz.
+    """
+    from embeddings import CLAP_SR, HOP_SEC as CLAP_HOP_SEC, WINDOW_SEC as CLAP_WINDOW_SEC, load_waveform_48k
+
+    clap_model = runtime["clap_model"]
+    clap_processor = runtime["clap_processor"]
+    head_model = runtime["head_model"]
+    label_std = runtime["label_standardization"]
+
+    window_samples = int(CLAP_WINDOW_SEC * CLAP_SR)
+    hop_samples = int(CLAP_HOP_SEC * CLAP_SR)
+
+    wav = load_waveform_48k(path_or_bytes)
+    total_samples = wav.shape[1]
+
+    raw_windows = []
+    if total_samples <= window_samples:
+        pad_amount = window_samples - total_samples
+        w = torch.nn.functional.pad(wav, (0, pad_amount)) if pad_amount > 0 else wav
+        raw_windows.append((0, total_samples, w))
+    else:
+        start, last_end = 0, 0
+        while start + window_samples <= total_samples:
+            raw_windows.append((start, start + window_samples, wav[:, start : start + window_samples]))
+            last_end = start + window_samples
+            start += hop_samples
+        if last_end < total_samples:
+            tail_start = total_samples - window_samples
+            raw_windows.append((tail_start, total_samples, wav[:, tail_start:total_samples]))
+
+    entries = []
+    for start, end, w in raw_windows:
+        rms = _rms(w)
+        entries.append({"start": start, "end": end, "wav": w, "rms": rms, "skipped": rms < SILENCE_RMS_THRESHOLD})
+
+    used_fallback = False
+    valid_entries = [e for e in entries if not e["skipped"]]
+    if not valid_entries:
+        used_fallback = True
+        for e in entries:
+            e["skipped"] = False
+        valid_entries = entries
+
+    arrs = [e["wav"].squeeze(0).numpy() for e in valid_entries]
+    inputs = clap_processor(audios=arrs, sampling_rate=CLAP_SR, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+    with torch.no_grad():
+        clap_embeds = clap_model.get_audio_features(**inputs)
+        pred_v_std, pred_a_std, _ = head_model(clap_embeds)
+
+    per_window_v = pred_v_std.cpu().numpy() * label_std["valence_std"] + label_std["valence_mean"]
+    per_window_a = pred_a_std.cpu().numpy() * label_std["arousal_std"] + label_std["arousal_mean"]
+
+    for e, v, a in zip(valid_entries, per_window_v, per_window_a):
+        e["valence"] = float(v)
+        e["arousal"] = float(a)
+
+    windows = [
+        WindowPrediction(
+            start_sec=e["start"] / CLAP_SR,
+            end_sec=e["end"] / CLAP_SR,
+            rms=e["rms"],
+            skipped=e["skipped"],
+            padding_ratio=0.0,
+            valence=e.get("valence"),
+            arousal=e.get("arousal"),
+        )
+        for e in entries
+    ]
+
+    overall_v = float(np.mean(per_window_v))
+    overall_a = float(np.mean(per_window_a))
+    std_v = float(np.std(per_window_v)) if len(per_window_v) > 1 else 0.0
+    std_a = float(np.std(per_window_a)) if len(per_window_a) > 1 else 0.0
+
+    return MultiWindowResult(
+        valence=overall_v,
+        arousal=overall_a,
+        valence_std=std_v,
+        arousal_std=std_a,
+        windows=windows,
+        n_windows_total=len(entries),
+        n_windows_used=len(valid_entries),
+        n_windows_skipped=len(entries) - len(valid_entries),
+        used_all_windows_fallback=used_fallback,
+    )
+
+
+def load_clap_head_runtime(checkpoint_path: str, device: str = "cpu") -> dict:
+    """
+    "clap_head" tipi bir selected_model_runtime sözlüğü kurar: CLAP omurgasını
+    (transformers) ve src/train_clap_head.py ile eğitilmiş başı yükler.
+    Checkpoint kendi kendine yeterlidir (omurga adı, embedding ayarları,
+    etiket standardizasyonu hepsi içinde).
+    """
+    from transformers import ClapModel, ClapProcessor
+
+    from train_clap_head import ClapVAHead
+
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    backbone_name = ckpt["backbone_model_name"]
+
+    clap_processor = ClapProcessor.from_pretrained(backbone_name)
+    clap_model = ClapModel.from_pretrained(backbone_name).to(device)
+    clap_model.eval()
+
+    hp = ckpt["hyperparameters"]
+    head_model = ClapVAHead(hidden_dims=tuple(hp["hidden_dims"]), dropout=hp["dropout"]).to(device)
+    head_model.load_state_dict(ckpt["model_state_dict"])
+    head_model.eval()
+
+    return {
+        "type": "clap_head",
+        "clap_model": clap_model,
+        "clap_processor": clap_processor,
+        "head_model": head_model,
+        "label_standardization": ckpt["label_standardization"],
+        "checkpoint_path": checkpoint_path,
+    }
+
+
 def predict_multi_window(
     path_or_bytes: AudioInput,
     selected_model_runtime: dict,
     device: str = "cpu",
 ) -> MultiWindowResult:
     """
-    Parçanın tamamını 30 sn / %50 örtüşmeli pencerelerle analiz eder.
+    Parçanın tamamını pencerelerle analiz eder.
 
     selected_model_runtime: app.py'deki ile aynı sözleşme -
-        {"type": "single", "model": ...} veya
-        {"type": "ensemble", "models": {...}, "weights": {...}}
+        {"type": "single", "model": ...},
+        {"type": "ensemble", "models": {...}, "weights": {...}}, veya
+        {"type": "clap_head", ...} (bkz. load_clap_head_runtime) -
+        bu durumda 30 sn/mel hattı yerine CLAP'ın kendi 10 sn/5 sn hattı
+        kullanılır (bkz. _predict_multi_window_clap).
     """
+    if selected_model_runtime.get("type") == "clap_head":
+        return _predict_multi_window_clap(path_or_bytes, selected_model_runtime, device=device)
+
     wav = _load_full_waveform(path_or_bytes)
     raw_windows = _build_windows(wav)
 
