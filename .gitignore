@@ -33,3 +33,6 @@ Duygu Durumu Analiz Anketi (Yanıtlar) - Form Yanıtları 1 (3).csv
 
 # Claude Code oturum durumu (proje içeriği değil)
 .claude/*.lock
+
+# Local tool config
+.claude/
